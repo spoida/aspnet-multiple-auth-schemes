@@ -5,10 +5,14 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace AuthTestApi.Controllers
 {
+    /// <summary>
+    /// AuthSchemeController specifies that AuthSchemeOne is required for authorization.
+    /// This only allows users that have successfully authenticated against AuthSchemeOne.
+    /// </summary>
     [ApiController]
     [Route("[controller]")]
     [Authorize(AuthenticationSchemes = AuthSchemeOneHandler.AuthSchemeOne)]
-    public class TestController : ControllerBase
+    public class AuthSchemeController : ControllerBase
     {
         [HttpGet]
         public IActionResult Get()

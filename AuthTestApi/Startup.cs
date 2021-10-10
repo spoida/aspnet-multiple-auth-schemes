@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using AuthTestApi.AuthSchemes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -73,30 +72,8 @@ namespace AuthTestApi
             services.AddSingleton<IPostConfigureOptions<AuthSchemeOneOptions>, AuthSchemeOnePostConfigureOptions>();
             services.AddSingleton<IPostConfigureOptions<AuthSchemeTwoOptions>, AuthSchemeTwoPostConfigureOptions>();
 
-            services.AddAuthentication(o =>
-                {
-                    o.DefaultScheme = "DynamicAuthScheme";
-                    o.DefaultChallengeScheme = "DynamicAuthScheme";
-                    o.DefaultAuthenticateScheme = "DynamicAuthScheme";
-                })
-                .AddPolicyScheme("DynamicAuthScheme", "Auth Scheme Selector", o =>
-                {
-                    // Dynamically select the Authentication scheme to evaluate.
-                    // If we don't do this, all registered schemes are evaluated when processing a request, which
-                    // can result in an identity being populated even when we have selected a specific scheme for authentication.
-                    o.ForwardDefaultSelector = context =>
-                    {
-                        // Inspect the HTTP Authorization header and switch based on its value.
-                        var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
-                        if (authHeader?.StartsWith($"{AuthSchemeOneHandler.AuthSchemeOne} ") == true)
-                        {
-                            return AuthSchemeOneHandler.AuthSchemeOne;
-                        }
-
-                        // Fallback to Authentication scheme AuthSchemeTwo - which also matches our FallbackPolicy below.
-                        return AuthSchemeTwoHandler.AuthSchemeTwo;
-                    };
-                })
+            // Set the default authentication scheme to AuthSchemeTwo
+            services.AddAuthentication(AuthSchemeTwoHandler.AuthSchemeTwo)
                 .AddScheme<AuthSchemeOneOptions, AuthSchemeOneHandler>(AuthSchemeOneHandler.AuthSchemeOne, o =>
                 {
                     o.ApiKey = "123";
@@ -108,11 +85,20 @@ namespace AuthTestApi
             
             services.AddAuthorization(options =>
                 {
-                    // Setting the FallbackPolicy means that only AuthSchemeTwo will be used in the absence
-                    // of any other Authorization directives.
-                    options.FallbackPolicy = new AuthorizationPolicyBuilder(AuthSchemeTwoHandler.AuthSchemeTwo)
+                    var fallbackPolicy = new AuthorizationPolicyBuilder(AuthSchemeTwoHandler.AuthSchemeTwo)
                         .RequireAuthenticatedUser()
                         .Build();
+                    
+                    // Important: Don't set the DefaultPolicy here.
+                    // If the DefaultPolicy is set then it automatically acts as though [Authorize] has been applied to all controllers. 
+                    // Doing this undermines any [Authorize(AuthenticationSchemes = "SchemeName")] set on a controller because the runtime
+                    // evaluates both [Authorize(AuthenticationSchemes = "SchemeName")] AND [Authorize] and will succeed if the request has
+                    // been authenticated by the default scheme.
+                    //options.DefaultPolicy = fallbackPolicy;
+                    
+                    // Setting the FallbackPolicy means that only AuthSchemeTwo will be used in the absence
+                    // of any other authorization directives.
+                    options.FallbackPolicy = fallbackPolicy;
                 });
         }
 
@@ -135,10 +121,11 @@ namespace AuthTestApi
 
             app.UseEndpoints(endpoints =>
             {
-                // Important: Don't specify RequireAuthorization() here because
-                // the default authorization policy just allows ALL authenticated users.
-                // We instead use a FallbackPolicy to add authorization to any controller
-                // that doesn't explicitly set the Authorize attribute.
+                // Important: Don't specify RequireAuthorization() here because:
+                // 1. It invokes the DefaultPolicy and we are explicitly NOT setting that because it
+                //    authorizes ALL authenticated users regardless of authentication scheme.
+                // 2. We prefer to use a FallbackPolicy to add authorization to any controller
+                //    that doesn't explicitly set the Authorize attribute.
                 endpoints.MapControllers();
             });
         }
